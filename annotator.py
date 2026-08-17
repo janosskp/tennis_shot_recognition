@@ -12,9 +12,11 @@ from pathlib import Path
 import pandas as pd
 import cv2
 
-LEFT_ARROW_KEY = 81
-UP_ARROW_KEY = 82
-RIGHT_ARROW_KEY = 83
+# OpenCV key codes differ across platforms and whether waitKey or waitKeyEx is used.
+LEFT_ARROW_KEYS = {81, 2424832}
+UP_ARROW_KEYS = {82, 2490368}
+RIGHT_ARROW_KEYS = {83, 2555904}
+EXIT_KEYS = {27, ord("q"), ord("Q")}
 
 
 if __name__ == "__main__":
@@ -44,23 +46,23 @@ if __name__ == "__main__":
             break
 
         cv2.imshow("Frame", frame)
-        k = cv2.waitKey(30)
+        k = cv2.waitKeyEx(30)
 
-        if k == RIGHT_ARROW_KEY:  # forehand
+        if k in RIGHT_ARROW_KEYS:  # forehand
             your_list.append({"Shot": "forehand", "FrameId": FRAME_ID})
             df = pd.DataFrame.from_records(your_list)
             print("Add forehand")
-        elif k == LEFT_ARROW_KEY:  # backhand
+        elif k in LEFT_ARROW_KEYS:  # backhand
             your_list.append({"Shot": "backhand", "FrameId": FRAME_ID})
             df = pd.DataFrame.from_records(your_list)
             print("Add backhand")
-        elif k == UP_ARROW_KEY:  # serve
+        elif k in UP_ARROW_KEYS:  # serve
             your_list.append({"Shot": "serve", "FrameId": FRAME_ID})
             df = pd.DataFrame.from_records(your_list)
             print("Add serve")
 
-        # Press Q on keyboard to  exit
-        if k == 27:
+        # Press Q or ESC on keyboard to exit
+        if k in EXIT_KEYS:
             break
 
         FRAME_ID += 1
