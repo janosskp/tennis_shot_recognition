@@ -4,6 +4,47 @@ YouTube video link : https://www.youtube.com/watch?v=CCqO5TXU7lc&ab_channel=anto
 
 If you want the best from this repo, please go to the [RNN inference](#inference-on-a-tennis-video)
 
+This project recognizes tennis backhands, forehands, serves and neutral/idle
+frames from a video. It uses MoveNet to extract a player's pose and either a
+fully connected classifier for individual frames or a GRU-based recurrent
+classifier for 30-frame sequences.
+
+## Requirements and setup
+
+Use Python 3.10 or 3.11 with a virtual environment. The project uses:
+
+- TensorFlow and Keras
+- OpenCV (`opencv-python`)
+- NumPy and pandas
+- tqdm
+- imageio (for GIF export in `visualize_features.py`)
+- Jupyter (for the training notebooks)
+
+Install the runtime dependencies with:
+
+```
+python -m pip install tensorflow keras opencv-python numpy pandas tqdm imageio jupyter
+```
+
+Run the dependency smoke test before processing videos:
+
+```
+python test_dependencies.py
+```
+
+Run commands from the repository root. The inference scripts configure a GPU
+when TensorFlow exposes one; CPU execution may require adapting the GPU setup
+for the local TensorFlow installation.
+
+## Project layout
+
+- `dataset/<source>/shots/`: pose sequences stored as labelled CSV files
+- `movenet.tflite`: MoveNet SinglePose Lightning model
+- `tennis_fully_connected.h5`: trained single-frame model
+- `tennis_rnn.h5`: trained sequence model
+- `train_rnn_myplayer.py`: reproducible script-based RNN training workflow
+- `res/`: example visualizations used in this README
+
 ## Movenet
 
 To download the movenet_lightning_f16 neural network from Tensorflow, run :
@@ -29,13 +70,15 @@ To get tennis videos, you can simply download them from any youtube converter, e
 
 ### Tennis shot annotation
 
-To make your annotation, you can use the [annotator.py](annotator.py) file, e.g
+To create annotations, use [annotator.py](annotator.py):
 
 ```
-$ python annotator.py dataset/nadal/nadal.mp4 
+python annotator.py dataset/nadal/nadal.mp4
 ```
 
-and click your keyboard to mark the shots. This will output a csv file, named `annotation_something.csv` containing something like this:
+Press the right arrow for a forehand, the left arrow for a backhand, and the
+up arrow for a serve. Press `q`, `Q` or `Esc` to stop. The script writes an
+`annotation_<video-name>.csv` file containing entries such as:
 
 ```
 Shot,FrameId
@@ -108,7 +151,7 @@ python visualize_features.py shots/forehand_001.csv
 </p>
 
 
-## Training with a fully connected layers neural network
+## Training with a fully connected neural network
 
 See [SingleFrameShotClassifier.ipynb](SingleFrameShotClassifier.ipynb)
 
@@ -120,15 +163,16 @@ In the notebook, we load our annotated datasets (csv files containing 1 second s
 
 With a fully connected layers, we can reach a validation accuracy of ~80% (see also the confusion matrix).
 
-And we export the neural network to *tennis_fully_connected.h5*
+The notebook exports the neural network to `tennis_fully_connected.h5`.
 
-## Display raw results (ShotCounter.nb_history = 1)
+## Frame-by-frame inference and shot counter
 
 ```
-python track_and_classify_frame_by_frame.py path/to/dimitrov_alcaraz.mp4 tennis_fully_connected.h5 
+python track_and_classify_frame_by_frame.py path/to/video.mp4 tennis_fully_connected.h5
 ```
 
-This will read the video of your choice, infer the movenet then feed it to your trained network at each frame. Probabilities of each class are displayed as vertical bars.
+This reads a video, extracts the pose with MoveNet, and classifies every frame
+with the fully connected model. Probabilities are displayed as vertical bars.
 
 <p>
 <em>Probabilities at each frame</em></br>
@@ -139,20 +183,18 @@ where classes are S(erve), B(ackhand), N(eutral) and F(orehand).
 
 As you can see, classification is very unstable on a single frame.
 
-## Use an averager and a basic shot counter
-
-```
-python track_and_classify_frame_by_frame.py path/to/dimitrov_alcaraz.mp4 tennis_fully_connected.h5 
-```
-
-Same priciple than before. But not we do an averaging of the shot probabilities over a sliding window of 10 frames. We add a basic shot counter to be able to detect (and not only classify) shots.
+The same script applies a 10-frame sliding probability average and a basic
+shot counter. The counter requires at least 60 frames between detected shots
+and reports backhand, forehand and serve counts on the video.
 
 <p>
 <em>Averaging and shot counter</em></br>
 <img src="res/example_single_frame_with_averaging_and_basic_counter.gif"  width="800" alt>
 </p>
 
-Proabilities are now smoother, and it s possible to have a decently working shot counter.
+Probabilities are smoother, making shot detection more stable than raw
+single-frame classification. Pass `--evaluate annotation.csv` to compare
+detected shots with an annotation file and print precision and recall.
 
 ## Training with a RNN (Recurrent Neural Network)
 
@@ -160,7 +202,24 @@ See [RNNShotClassifier.ipynb](RNNShotClassifier.ipynb)
 
 In the notebook, we load our annotated datasets (csv files containing 1 second shot) as a temporal sequence of the human pose. We then use keras GRU recurrent neural network to train it.
 
-I get close to ~100% accuracy.
+The notebook trains a Keras GRU on 30-frame pose sequences. It includes the
+available player/video sources and reports validation metrics for the four
+classes.
+
+### Script-based training with `myplayer`
+
+For a repeatable workflow outside Jupyter, run:
+
+```
+python train_rnn_myplayer.py
+```
+
+The script loads CSV sequences from `nadal`, `djoko_sock`, `federer`,
+`alcaraz`, `dimitrov_alcaraz`, `dimitrov_thiem`, `roland` and `myplayer`.
+It normalizes the Nadal x-coordinates for the opposite handedness, shuffles
+the data with a fixed seed, reserves 33% for validation, and trains a GRU with
+early stopping. The best weights are saved to `weights_myplayer.hdf5` and the
+final model is exported as `tennis_rnn_myplayer.h5`.
 
 ## Inference on a tennis video
 
@@ -175,4 +234,13 @@ It runs faster than real-time on my GPU.
 python track_and_classify_with_rnn.py path/to/video.mp4 tennis_rnn.h5
 ```
 
-You can append `--left-handed` if your player is left-handed.
+The RNN uses a sliding window of 30 frames and a confidence threshold for
+shot detection. Use the model generated by the standalone training script with:
+
+```
+python track_and_classify_with_rnn.py path/to/video.mp4 tennis_rnn_myplayer.h5
+```
+
+Append `--left-handed` when the player is left-handed. The script can also
+accept `--evaluate annotation.csv` to display precision and recall against
+ground-truth annotations.
